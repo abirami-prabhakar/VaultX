@@ -119,7 +119,9 @@ def main():
             output = ROOT / '.local' / 'inference-ocr-verification.json'
             output.parent.mkdir(exist_ok=True)
             report = json.dumps({'model': settings.gemma_model, 'ocr_engine': settings.ocr_engine,
-                                 'passed': len(results), 'expected_checks': 10, 'completed': len(results) == 10,
+                                 'passed': len(results), 'expected_checks': 10,
+                                 'completed': len(results) == 10 and len(failure_probes) == (2 if args.failure_probes else 0),
+                                 'expected_failure_probes': 2 if args.failure_probes else 0,
                                  'failure_probes': failure_probes, 'results': results}, indent=2)
             output.write_text(report, encoding='utf-8')
             model_slug = re.sub(r'[^A-Za-z0-9._-]', '_', settings.gemma_model)[:100]

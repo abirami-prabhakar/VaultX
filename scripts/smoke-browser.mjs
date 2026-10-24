@@ -337,6 +337,19 @@ try {
     await click('nav a[href="#dashboard"]');
     await waitFor('!document.querySelector(".sidebar").classList.contains("open") && location.hash === "#dashboard"', 'mobile menu navigation');
   });
+  if (process.env.SMOKE_MODEL_RECORD_ID) {
+    await step('Actual model extraction and page provenance appear in the review UI', async () => {
+      await navigate(`instrument/${process.env.SMOKE_MODEL_RECORD_ID}`, '!!document.querySelector(".extraction-source")');
+      const actual = await record();
+      assert.equal(actual.extraction_mode, 'gemma');
+      assert.equal(actual.original_extraction.provenance.field_extractor, 'model');
+      assert.equal(actual.status, 'pending_review');
+      if (process.env.SMOKE_EXPECTED_MODEL) assert.equal(actual.original_extraction.model, process.env.SMOKE_EXPECTED_MODEL);
+      const visible = await evaluate('document.querySelector(".extraction-source").innerText');
+      assert(visible.includes(actual.original_extraction.model));
+      assert.match(visible, /Page 1/);
+    });
+  }
   await step('No application console exceptions or failed network requests', async () => {
     assert.deepEqual(consoleErrors, []);
     assert.deepEqual(networkErrors, []);

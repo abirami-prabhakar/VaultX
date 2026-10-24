@@ -257,6 +257,9 @@ def test_scoped_repair_retains_grounded_fields_and_rejects_outside_changes(setti
         else:
             schema = body['response_format']['json_schema']['schema']
             assert schema['$defs']['ExtractionFields']['required'] == ['instrument_number']
+            assert schema['$defs']['ExtractionFields']['properties']['instrument_number']['enum'] == ['SYN-2026-001', None]
+            assert schema['$defs']['Evidence']['properties']['quote']['enum'] == ['FDR Number: SYN-2026-001']
+            assert schema['$defs']['Evidence']['properties']['page']['enum'] == [1]
             assert schema['properties']['evidence']['maxItems'] == 1
             payload = {'fields': {'instrument_number': 'SYN-2026-001'}, 'evidence': [
                 {'field': 'instrument_number', 'page': 1, 'quote': 'FDR Number: SYN-2026-001'}]}
@@ -287,3 +290,41 @@ def test_ambiguous_source_values_are_not_repaired_into_known_values(settings, mo
     assert result.fields.holder_name is None
     assert result._repair_attempts == 0
     assert len(calls) == 1
+
+
+def test_multiple_failed_fields_get_one_focused_repair_each(settings, monkeypatch):
+    settings.gemma_base_url, settings.gemma_model = 'http://localhost:8081/v1', 'synthetic-gemma'
+    values = {'instrument_number': 'SYN-2026-001', 'holder_name': 'Fictional Example Holder', 'bank_name': 'Fictional Example Bank'}
+    calls = []
+    def runtime(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        if len(calls) == 1:
+            payload = {'fields': {**values, 'instrument_number': 'SYN-26-001'}, 'evidence': [
+                {'field': 'bank_name', 'page': 1, 'quote': 'Bank Name: Fictional Example Bank'},
+                {'field': 'instrument_number', 'page': 1, 'quote': 'FDR Number: SYN-2026-001'}]}
+        else:
+            names = body['response_format']['json_schema']['schema']['$defs']['ExtractionFields']['required']
+            assert len(names) == 1 and len(body['messages']) == 4
+            field = names[0]
+            payload = {'fields': {field: values[field]}, 'evidence': [{'field': field, 'page': 1, 'quote': values[field]}]}
+        return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps(payload)}}]})
+    fake_runtime(monkeypatch, runtime)
+    result = extraction.gemma_extract(['FDR Number: SYN-2026-001\nBank Name: Fictional Example Bank\nHolder Name: Fictional Example Holder'], [], settings)
+    assert len(calls) == 3 and result._repair_attempts == 2
+    assert all(getattr(result.fields, field) == value for field, value in values.items())
+
+
+def test_repair_null_is_preserved_even_when_source_candidate_is_available(settings, monkeypatch):
+    settings.gemma_base_url, settings.gemma_model = 'http://localhost:8081/v1', 'synthetic-gemma'
+    calls = []
+    def runtime(request):
+        calls.append(request)
+        value = 'SYN-26-001' if len(calls) == 1 else None
+        payload = {'fields': {'instrument_number': value}, 'evidence': [
+            {'field': 'instrument_number', 'page': 1, 'quote': 'FDR Number: SYN-2026-001'}]}
+        return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps(payload)}}]})
+    fake_runtime(monkeypatch, runtime)
+    result = extraction.gemma_extract(['FDR Number: SYN-2026-001'], [], settings)
+    assert len(calls) == 2 and result.fields.instrument_number is None
+    assert 'instrument_number' in result.missing_fields

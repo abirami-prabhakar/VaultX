@@ -79,11 +79,13 @@ def main():
             model_url = f'https://modelscope.cn/models/{repository}/resolve/{profile["revision"]}/{filename}'
             checksum = item['Sha256']
         else:
-            model = client.get(f'https://huggingface.co/api/models/{repository}/revision/{profile["revision"]}?blobs=true')
+            model = client.get(f'https://huggingface.co/api/models/{repository}?blobs=true')
             model.raise_for_status()
             model = model.json()
             item = next(f for f in model['siblings'] if f['rfilename'] == filename)
-            model_url = f'https://huggingface.co/{repository}/resolve/{profile["revision"]}/{filename}'
+            # Mirror Git revisions can differ. Resolve an immutable HF
+            # snapshot, but require the same pinned file-content checksum.
+            model_url = f'https://huggingface.co/{repository}/resolve/{model["sha"]}/{filename}'
             checksum = item['lfs']['sha256']
     archive = ROOT / '.local' / asset['name']
     download(asset['browser_download_url'], archive, asset['digest'].removeprefix('sha256:'), 40_000_000)

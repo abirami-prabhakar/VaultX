@@ -1,0 +1,82 @@
+{
+  "batch_id": "c3469bc3",
+  "synthetic": true,
+  "watermark": "SYNTHETIC DEMO — NOT A REAL BANK DOCUMENT",
+  "generated_with": "scripts/generate-clean-dataset.py (PyMuPDF)",
+  "expected_configuration": {
+    "minimum_amount": "10000",
+    "currency": "INR"
+  },
+  "documents": [
+    {
+      "filename": "01_complete_text.pdf",
+      "kind": "text",
+      "page_count": 1,
+      "expected_fields": {
+        "instrument_number": "VX-CLEAN-C3469BC3-001",
+        "bank_name": "Fictional Cedar Demo Institution",
+        "holder_name": "Fictional Amber Test Depositor",
+        "amount": "250000.00",
+        "currency": "INR",
+        "issue_date": "2026-10-01",
+        "maturity_date": "2027-10-01"
+      }
+    },
+    {
+      "filename": "02_complete_text.pdf",
+      "kind": "text",
+      "page_count": 1,
+      "expected_fields": {
+        "instrument_number": "VX-CLEAN-C3469BC3-002",
+        "bank_name": "Fictional Juniper Demo Institution",
+        "holder_name": "Fictional Coral Test Depositor",
+        "amount": "300000.00",
+        "currency": "INR",
+        "issue_date": "2026-10-01",
+        "maturity_date": "2027-11-01"
+      }
+    },
+    {
+      "filename": "03_complete_text.pdf",
+      "kind": "text",
+      "page_count": 1,
+      "expected_fields": {
+        "instrument_number": "VX-CLEAN-C3469BC3-003",
+        "bank_name": "Fictional Harbor Demo Institution",
+        "holder_name": "Fictional Indigo Test Depositor",
+        "amount": "450000.00",
+        "currency": "INR",
+        "issue_date": "2026-10-01",
+        "maturity_date": "2027-12-01"
+      }
+    },
+    {
+      "filename": "04_complete_scan.pdf",
+      "kind": "scanned",
+      "page_count": 1,
+      "expected_fields": {
+        "instrument_number": "VX-CLEAN-C3469BC3-004",
+        "bank_name": "Fictional Willow Demo Institution",
+        "holder_name": "Fictional Ivory Test Depositor",
+        "amount": "600000.00",
+        "currency": "INR",
+        "issue_date": "2026-10-01",
+        "maturity_date": "2028-01-01"
+      }
+    },
+    {
+      "filename": "05_complete_mixed.pdf",
+      "kind": "mixed",
+      "page_count": 2,
+      "expected_fields": {
+        "instrument_number": "VX-CLEAN-C3469BC3-005",
+        "bank_name": "Fictional Maple Demo Institution",
+        "holder_name": "Fictional Teal Test Depositor",
+        "amount": "750000.00",
+        "currency": "INR",
+        "issue_date": "2026-10-01",
+        "maturity_date": "2028-02-01"
+      }
+    }
+  ]
+}

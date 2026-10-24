@@ -1,5 +1,7 @@
 # Local inference and scanned-document OCR
 
+For the restored Gemma profile, explicit Gemma/Qwen selection and current model-specific verification, see [Gemma support](gemma.md). The Qwen setup and earlier results below remain available.
+
 The original deployment had empty model configuration, no running inference service, OCR disabled and no OCR dependencies. Its scan heuristic skipped image-bearing pages with a digital header and rasterized other scans at 72 DPI. The adapters now support CPU OCR, explicit coverage, constrained JSON, actionable failures and per-page provenance.
 
 ## Windows CPU profile
@@ -77,7 +79,7 @@ With `npm run model` running and the configuration above, execute:
 
 This command uses actual OCR and model calls, a disposable SQLite database, and only synthetic data. It compares text PDFs, rasterized scanned PDFs, PNG images, mixed PDFs, missing/conflicting fields and an injection document against independent ground-truth JSON. It fails if any check fails; no real checks are skipped or mocked. Results are written under ignored `.local/inference-ocr-verification.json`, including actual extracted fields, methods and duration. The command never approves documents.
 
-## Observed verification
+## Earlier Qwen-focused verification
 
 On 24 October 2026 (Windows, Python 3.11.9, Node 24.14.1):
 
@@ -95,6 +97,6 @@ Real checks cover scanned PDF, PNG, JPEG, mixed-page PDF, a single page combinin
 
 The first real run passed five checks and failed the missing-fields case: the small model misidentified the bank and combined conflicting names. Source-derived label hints and deterministic grounding were added, with regressions; the final nine-check run then passed without relaxing the ground-truth assertions. No missing model fields are filled from parser output. The small model still over-reports uncertainty on the ambiguous fixture, producing extra review findings; this limitation is retained visibly.
 
-Hugging Face connections reset and PyPI's OpenCV download repeatedly stalled. The identical official Qwen repository on ModelScope was reachable; the OpenCV mirror wheel was checked against PyPI's official SHA-256. Both installations completed. There is no remaining installation blocker for this CPU profile. Gemma weights and PaddleOCR were not run; the verified alternatives are Qwen and RapidOCR. Prompt Guard remains an independent, unavailable optional classifier.
+Hugging Face connections reset and PyPI's OpenCV download repeatedly stalled. The identical official Qwen repository on ModelScope was reachable; the OpenCV mirror wheel was checked against PyPI's official SHA-256. Both installations completed. There is no remaining installation blocker for this CPU profile. At this earlier checkpoint Gemma weights and PaddleOCR had not run. Current Gemma results are recorded in [Gemma support](gemma.md). Prompt Guard remains an independent, unavailable optional classifier.
 
 Normal regressions remain `npm run test:backend`, `npm test`, `npm run test:setup`, and `npm run build`. Native OCR/PDF processing still needs worker isolation for hostile production workloads; timeout settings do not kill native parser threads. Existing AGPL license and human authorization controls remain unchanged.
