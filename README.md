@@ -1,6 +1,9 @@
+
 # VaultX
 
 **Verify with evidence. Decide with confidence.**
+
+# FDR Intelligence 
 
 A runnable, local-first MVP for **human-led Fixed Deposit Receipt review**. Upload a receipt, extract fields with page evidence, run deterministic checks, record corrections and decisions, and retain an append-only audit history. The application does not contact banks, establish authenticity, decide legal compliance, declare fraud, or release funds.
 
