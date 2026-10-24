@@ -2,8 +2,11 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { ensureLocalEnvironment } from './setup.mjs';
+import { localModelCommand } from './model-server.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+ensureLocalEnvironment(root);
 if (existsSync(path.join(root, '.env'))) process.loadEnvFile(path.join(root, '.env'));
 const windows = process.platform === 'win32';
 const venvPython = path.join(root, '.venv', windows ? 'Scripts/python.exe' : 'bin/python');
@@ -26,6 +29,10 @@ function run(command, args, cwd) {
   children.push(child);
   child.on('error', error => { console.error(error.message); stop(1); });
   child.on('exit', code => { if (!stopping) stop(code ?? 1); });
+}
+if (process.env.LOCAL_MODEL_ENABLED === 'true') {
+  const [binary, args] = localModelCommand(root);
+  run(binary, args, root);
 }
 run(python, ['-m', 'uvicorn', 'app.main:app', '--app-dir', 'backend', '--host', '127.0.0.1', '--port', process.env.BACKEND_PORT || '8001'], root);
 run(process.execPath, [vite, '--host', '127.0.0.1', '--port', '5173', '--strictPort'], path.join(root, 'frontend'));

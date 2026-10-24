@@ -1,0 +1,20 @@
+{
+  "document": "02_low_amount_fdr.pdf",
+  "synthetic": true,
+  "watermark": "SYNTHETIC DEMO — NOT A REAL BANK DOCUMENT",
+  "fields": {
+    "instrument_number": "VX-SYN-2026-002",
+    "bank_name": "Cedar Demonstration Bank (fictional)",
+    "holder_name": "Rowan Sample (fictional)",
+    "amount": "500.00",
+    "currency": "INR",
+    "issue_date": "2026-10-01",
+    "maturity_date": "2026-12-15"
+  },
+  "missing_fields": [],
+  "uncertain_fields": [],
+  "expected_rule_ids_when_alone": ["MINIMUM_AMOUNT"],
+  "expected_status_after_extraction": "pending_review",
+  "upload_order": 2,
+  "context": "Default 10000 INR minimum. An amount finding is an issue for review; it does not establish fraud. Approval is blocked until the human resolves all findings with reasons."
+}

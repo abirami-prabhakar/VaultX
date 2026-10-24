@@ -1,11 +1,16 @@
 {
-  "name": "fdr-intelligence",
+  "name": "vaultx",
   "version": "1.0.0",
   "private": true,
-  "description": "Human-led fixed deposit receipt review with traceable extraction and deterministic validation.",
+  "description": "VaultX — Verify with evidence. Decide with confidence.",
   "license": "AGPL-3.0-only",
   "engines": { "node": "^22.12.0 || ^24.0.0 || >=26.0.0" },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "model": "node scripts/model-server.mjs",
+    "model:select": "node scripts/select-model.mjs",
+    "samples": "node scripts/generate-demo.mjs",
+    "test:setup": "node --test scripts/setup.test.mjs scripts/model-profiles.test.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "npm --prefix frontend run build",
     "test": "npm --prefix frontend run test",

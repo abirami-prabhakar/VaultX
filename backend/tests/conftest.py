@@ -1,7 +1,12 @@
 from pathlib import Path
+import os
+from secrets import token_hex
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# A test-process-only credential lets direct pytest runs import the ASGI app.
+# No default credential exists in application configuration.
+os.environ.setdefault('API_KEY', token_hex(32))
 
 import pytest
 from fastapi.testclient import TestClient

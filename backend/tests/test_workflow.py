@@ -15,7 +15,7 @@ from app.main import create_app
 from app.models import AuditEvent, Instrument
 from app.samples import sample_fields, sample_pdf
 from app.schemas import parse_amount
-from app.validation import evaluate
+from app.validation import evaluate, evidence_supports
 
 
 def upload_and_extract(client, name='valid-fdr.pdf', mode='demo'):
@@ -293,6 +293,31 @@ def test_evidence_quote_cannot_truncate_a_numeric_token(settings, page_text):
     extraction = {'fields': fields, 'evidence': [{'field': 'amount', 'page': 1, 'quote': 'Amount: 100'}], 'uncertain_fields': []}
     findings = evaluate(fields, extraction, [page_text], {}, [], settings)
     assert any(f['rule_id'] == 'EVIDENCE_CONFLICT' and f['field'] == 'amount' for f in findings)
+
+
+@pytest.mark.parametrize('quote', [
+    'Deposit Amount: -1000.00',
+    'Deposit Amount: - 1,000.00',
+    'Deposit Amount: \u22121000.00',
+    'Deposit Amount: (1000.00)',
+    'Deposit Amount: ( INR 1,000.00 )',
+    'Deposit Amount: 1000.00-',
+])
+def test_negative_document_amount_cannot_support_positive_extraction(settings, quote):
+    fields = sample_fields('valid-fdr.pdf')
+    fields['amount'] = '1000.00'
+    extraction = {'fields': fields, 'evidence': [{'field': 'amount', 'page': 1, 'quote': quote}], 'uncertain_fields': []}
+    findings = evaluate(fields, extraction, [quote], {}, [], settings)
+    assert any(f['rule_id'] == 'VALUE_EVIDENCE_CONFLICT' and f['field'] == 'amount' for f in findings)
+
+
+@pytest.mark.parametrize('quote', [
+    'Deposit Amount: 1,000.00',
+    'Deposit Amount: +1000.00',
+    'Page 0; Deposit Amount: 1000.00',
+])
+def test_positive_amount_evidence_remains_supported_with_unrelated_numeric_tokens(quote):
+    assert evidence_supports('amount', '1000.00', quote)
 
 
 def test_new_duplicate_reopens_resolved_finding_even_on_approved_peer(client):

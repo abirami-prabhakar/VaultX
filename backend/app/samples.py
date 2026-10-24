@@ -35,7 +35,7 @@ def sample_pdf(name):
     page = document.new_page()
     page.draw_rect(fitz.Rect(35, 35, 560, 800), color=(0.15, 0.45, 0.45), width=2)
     page.insert_text((55, 80), 'SYNTHETIC SAMPLE - NOT A BANK DOCUMENT', fontsize=16, color=(0.1, 0.35, 0.35))
-    page.insert_text((55, 115), 'Fixed Deposit Receipt | FDR Intelligence demonstration', fontsize=12)
+    page.insert_text((55, 115), 'Fixed Deposit Receipt | VaultX demonstration', fontsize=12)
     for index, (field, label) in enumerate(labels.items()):
         page.insert_text((55, 180 + index * 55), f'{label}: {fields[field] or "unreadable"}', fontsize=12)
     page.insert_text((55, 720), 'For software testing only. No funds, bank verification or legal validity.', fontsize=10)

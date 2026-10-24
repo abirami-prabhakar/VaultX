@@ -1,5 +1,4 @@
 """Deterministic findings are review issues, never proof of fraud."""
-from dataclasses import dataclass
 import re
 
 from .config import Settings
@@ -25,10 +24,22 @@ def evidence_supports(field, value, quote):
     if field == 'amount':
         try:
             amount = parse_amount(value)
-            tokens = re.findall(r'(?<![\w.,])\d[\d,]*(?:\.\d+)?(?![\w.,])', quote)
-            return any(parse_amount(token.replace(',', '')) == amount for token in tokens)
         except ValueError:
             return False
+        for match in re.finditer(r'(?<![\w.,])\d[\d,]*(?:\.\d+)?(?![\w.,])', quote):
+            before, after = quote[:match.start()].rstrip(), quote[match.end():].lstrip()
+            # A minus sign or accounting parentheses must never become evidence
+            # for a positive amount merely because the digits match.
+            if re.search(r'[-\u2212\u2013\u2014]\s*$', before) or after.startswith(('-', '\u2212')):
+                continue
+            if re.search(r'\(\s*(?:[A-Z]{3}|[$\u20ac\u00a3\u20b9])?\s*$', before, re.I) and after.startswith(')'):
+                continue
+            try:
+                if parse_amount(match.group().replace(',', '')) == amount:
+                    return True
+            except ValueError:
+                continue
+        return False
     return contains_exact(value, quote, identifier=field == 'instrument_number')
 
 

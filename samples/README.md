@@ -1,6 +1,6 @@
 # Synthetic receipts only
 
-These PDFs are fictional fixtures for FDR Intelligence. They contain no actual bank receipts, real account information, funds, or verification results. Each page is visibly marked **SYNTHETIC SAMPLE — NOT A BANK DOCUMENT**.
+These PDFs are legacy fictional fixtures for VaultX. They contain no actual bank receipts, real account information, funds, or verification results. Each page is visibly marked **SYNTHETIC SAMPLE — NOT A BANK DOCUMENT**. Use the [canonical five-case demo dataset](vaultx/README.md) for the MVP demonstration and independent ground truth.
 
 | File | Intended scenario |
 | --- | --- |

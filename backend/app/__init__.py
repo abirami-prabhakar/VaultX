@@ -1,1 +1,1 @@
-"""FDR Intelligence local review service."""
+"""VaultX local review service."""

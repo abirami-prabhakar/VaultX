@@ -1,0 +1,20 @@
+{
+  "document": "04_missing_fields_fdr.pdf",
+  "synthetic": true,
+  "watermark": "SYNTHETIC DEMO — NOT A REAL BANK DOCUMENT",
+  "fields": {
+    "instrument_number": "VX-SYN-2026-004",
+    "bank_name": "Harbor Demonstration Bank (fictional)",
+    "holder_name": null,
+    "amount": "80000.00",
+    "currency": "INR",
+    "issue_date": "2026-10-01",
+    "maturity_date": null
+  },
+  "missing_fields": ["holder_name", "maturity_date"],
+  "uncertain_fields": ["holder_name"],
+  "expected_rule_ids_when_alone": ["REQUIRED_FIELD", "UNCERTAIN_EXTRACTION"],
+  "expected_status_after_extraction": "pending_review",
+  "upload_order": 4,
+  "context": "The source shows two different holder names and unreadable maturity. Neither can be chosen/invented. Two REQUIRED_FIELD findings and an UNCERTAIN_EXTRACTION finding require human clarification."
+}

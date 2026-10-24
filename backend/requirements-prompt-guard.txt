@@ -1,0 +1,8 @@
+# OPTIONAL only. Core app and Security Lab work without these packages.
+# Install a suitable PyTorch build from https://pytorch.org/get-started/locally/
+# first if you need a platform-specific CPU/CUDA wheel.
+# This dependency set is a compatibility target, NOT runtime-tested here.
+torch>=2.6,<3
+transformers>=4.57.1,<6
+sentencepiece>=0.2,<1
+safetensors>=0.4.5,<1

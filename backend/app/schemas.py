@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 FIELD_NAMES = ('instrument_number', 'bank_name', 'amount', 'currency', 'issue_date', 'maturity_date', 'holder_name')
 
@@ -39,6 +39,7 @@ class Evidence(StrictModel):
 
 
 class ExtractionPayload(StrictModel):
+    _repair_attempts: int = PrivateAttr(default=0)
     fields: ExtractionFields
     evidence: list[Evidence] = Field(default_factory=list, max_length=100)
     uncertain_fields: list[Literal['instrument_number', 'bank_name', 'amount', 'currency', 'issue_date', 'maturity_date', 'holder_name']] = Field(default_factory=list)
@@ -76,11 +77,11 @@ def parse_amount(value: str | None) -> Decimal | None:
     if value is None:
         return None
     if not re.fullmatch(r'\d+(?:\.\d{1,2})?', value):
-        raise ValueError('Expected a nonnegative decimal amount with up to two fractional digits')
+        raise ValueError('Expected a positive decimal amount with up to two fractional digits')
     try:
         result = Decimal(value)
     except InvalidOperation as exc:
         raise ValueError('Invalid decimal amount') from exc
-    if not result.is_finite() or result > Decimal('999999999999999999.99'):
+    if not result.is_finite() or result <= 0 or result > Decimal('999999999999999999.99'):
         raise ValueError('Amount is outside supported range')
     return result

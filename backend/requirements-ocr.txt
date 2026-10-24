@@ -1,0 +1,4 @@
+# CPU-only OCR; RapidOCR ships its default ONNX assets. No Paddle/Torch required.
+rapidocr==3.10.0
+onnxruntime==1.31.0
+opencv-python-headless==4.11.0.86

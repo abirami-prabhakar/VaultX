@@ -1,0 +1,22 @@
+{
+  "document": "03_duplicate_fdr.pdf",
+  "synthetic": true,
+  "watermark": "SYNTHETIC DEMO — NOT A REAL BANK DOCUMENT",
+  "fields": {
+    "instrument_number": "VX-SYN-2026-001",
+    "bank_name": "Northstar Demonstration Bank (fictional)",
+    "holder_name": "Mira Example (fictional)",
+    "amount": "250000.00",
+    "currency": "INR",
+    "issue_date": "2026-10-01",
+    "maturity_date": "2026-11-08"
+  },
+  "missing_fields": [],
+  "uncertain_fields": [],
+  "expected_rule_ids_when_alone": [],
+  "expected_rule_ids_after_uploading": ["DUPLICATE_NUMBER"],
+  "expected_status_after_extraction": "pending_review",
+  "upload_order": 3,
+  "prerequisite": "01_valid_fdr.pdf uploaded and extracted first",
+  "context": "Duplicate findings require another persisted record with the same number. Upload after case 01; both records must be flagged. Any prior human decision on case 01 is preserved."
+}

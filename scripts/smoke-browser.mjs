@@ -9,10 +9,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+if (existsSync(path.join(root, '.env'))) process.loadEnvFile(path.join(root, '.env'));
 const local = path.join(root, '.local');
 const origin = process.env.SMOKE_FRONTEND_URL || 'http://127.0.0.1:5173';
 const backend = process.env.SMOKE_BACKEND_URL || 'http://127.0.0.1:8001';
-const apiKey = process.env.SMOKE_API_KEY || 'local-demo-key';
+const apiKey = process.env.SMOKE_API_KEY || process.env.API_KEY;
 const port = Number(process.env.SMOKE_DEBUG_PORT || 19222);
 const chromePath = process.env.CHROME_BIN || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -138,6 +139,9 @@ async function uploadFixture(name) {
   const file = path.join(local, `browser-${name}`);
   await writeFile(file, Buffer.from(await response.arrayBuffer()));
   await navigate('upload', '!!document.querySelector("input[type=file]")');
+  // This regression workflow exercises the explicit parser fallback even when
+  // the workspace defaults to a genuinely running model.
+  await setValue('#extraction-mode', 'demo');
   const { root: documentNode } = await send('DOM.getDocument', {});
   const { nodeId } = await send('DOM.querySelector', { nodeId: documentNode.nodeId, selector: 'input[type=file]' });
   await send('DOM.setFileInputFiles', { nodeId, files: [file] });
@@ -149,6 +153,7 @@ async function uploadFixture(name) {
 
 try {
   await mkdir(local, { recursive: true });
+  if (!apiKey) throw new Error('Set SMOKE_API_KEY or run npm run setup to configure the private local reviewer key.');
   if (!existsSync(chromePath)) throw new Error('Installed Chrome was not found. Set CHROME_BIN to the browser executable.');
   chrome = spawn(chromePath, [
     '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
@@ -188,6 +193,11 @@ try {
 
   await step('Dashboard connects to the actual backend', async () => {
     await send('Page.navigate', { url: origin });
+    await waitFor('!!document.querySelector("#reviewer-key") || document.querySelectorAll(".metric-value").length === 4', 'workspace connection or dashboard');
+    if (await evaluate('!!document.querySelector("#reviewer-key")')) {
+      await setValue('#reviewer-key', apiKey);
+      await click('.reviewer-connection button[type=submit]');
+    }
     await waitFor('document.querySelectorAll(".metric-value").length === 4 && [...document.querySelectorAll(".metric-value")].every(node => /^\\d/.test(node.textContent.trim()))', 'live dashboard metrics');
     assert.match(await evaluate('document.body.innerText'), /Backend connected/);
   });
@@ -269,6 +279,44 @@ try {
     await setValue('select[aria-label="Filter audit action"]', 'approve');
     await waitFor('document.querySelector(".audit-panel")?.innerText.includes("Browser smoke: original synthetic")', 'audit action filter');
   });
+  await step('Security Lab runs isolated checks and displays actual outcomes and evidence', async () => {
+    await click('nav a[href="#security-lab"]');
+    await waitFor('!!document.querySelector("#lab-results-title") && [...document.querySelectorAll("button")].some(node => node.textContent.trim() === "Run security checks" && !node.disabled)', 'Security Lab control inventory');
+    assert.match(await evaluate('document.body.innerText'), /not a security guarantee/);
+    await click('button', 'Run security checks');
+    await waitFor('document.querySelectorAll(".lab-case").length > 0 && [...document.querySelectorAll("button")].some(node => node.textContent.trim() === "Run security checks" && !node.disabled)', 'real Security Lab results', 45000);
+    const response = await fetch(`${backend}/security-lab`, { headers: { 'X-API-Key': apiKey }, signal: AbortSignal.timeout(15000) });
+    assert.equal(response.status, 200);
+    const inventory = await response.json();
+    const report = inventory.last_run;
+    assert(report?.id && report.cases.length > 0, 'A persisted backend report must exist');
+    assert.equal(report.summary.total, report.cases.length);
+    assert(report.cases.some(item => item.status === 'passed'), 'Integration checks should have actual results');
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".lab-metrics .metric-value")].map(node => Number(node.textContent))'), ['total', 'passed', 'failed', 'skipped'].map(key => report.summary[key]));
+    assert.equal(await evaluate('document.querySelectorAll(".lab-case").length'), report.cases.length);
+    if (!report.guard.runtime_verified) {
+      assert(report.cases.some(item => item.method === 'classifier' && item.status === 'skipped'), 'Unavailable classifier checks must be skipped explicitly');
+      assert.match(await evaluate('document.querySelector(".lab-classifier").innerText'), /Not verified|unavailable|disabled/i);
+    }
+    await click('.lab-case > summary');
+    assert.equal(await evaluate('!!document.querySelector(".lab-case[open] .lab-evidence")'), true);
+    assert.match(await evaluate('document.querySelector(".lab-case[open]").innerText'), /Expected[\s\S]*Observed[\s\S]*Recorded evidence/i);
+    const category = report.cases[0].category;
+    await setValue('select[aria-label="Filter security category"]', category);
+    await waitFor(`document.querySelectorAll('.lab-case').length === ${report.cases.filter(item => item.category === category).length}`, 'Security Lab category filter');
+    await setValue('select[aria-label="Filter security category"]', '');
+    const outcome = report.cases.some(item => item.status === 'skipped') ? 'skipped' : 'passed';
+    await setValue('select[aria-label="Filter security outcome"]', outcome);
+    await waitFor(`document.querySelectorAll('.lab-case').length === ${report.cases.filter(item => item.status === outcome).length}`, 'Security Lab outcome filter');
+    await setValue('select[aria-label="Filter security outcome"]', '');
+    await click('button', 'Reload saved report');
+    await waitFor(`document.querySelector('.lab-run-facts')?.innerText.includes(${JSON.stringify(report.id)})`, 'reloaded Security Lab report');
+    await navigate('dashboard', 'document.querySelectorAll(".metric-value").length === 4');
+    await navigate('security-lab', `document.querySelector('.lab-run-facts')?.innerText.includes(${JSON.stringify(report.id)})`);
+    await click('.lab-case > summary');
+    const screenshot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+    await writeFile(path.join(local, 'security-lab.png'), Buffer.from(screenshot.data, 'base64'));
+  });
   await step('Mobile screens fit a 390px viewport and menu navigation works', async () => {
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     for (const [route, ready] of [
@@ -276,6 +324,7 @@ try {
       ['queue', '!!document.querySelector(".records-panel")'],
       ['upload', '!!document.querySelector(".upload-form")'],
       ['audit', '!!document.querySelector(".audit-panel")'],
+      ['security-lab', '!!document.querySelector("#lab-results-title")'],
       [`instrument/${uploaded.id}`, '!!document.querySelector(".detail-layout")'],
     ]) {
       await navigate(route, ready);

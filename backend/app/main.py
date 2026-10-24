@@ -1,23 +1,24 @@
 from collections import Counter
-from contextlib import asynccontextmanager
 from datetime import date, timedelta, timezone
 import hashlib
 import hmac
 from pathlib import Path
-import warnings
+import threading
 
-import pymupdf as fitz
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
-from PIL import Image, UnidentifiedImageError
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
-from .extraction import ExtractionFailure, demo_extract, gemma_extract, ocr_available, read_pages
-from .models import AuditEvent, Base, Document, Extraction, Finding, Instrument, ReviewDecision, configure_sqlite, protect_history, uid, utcnow
+from .extraction import ExtractionFailure, demo_extract, gemma_extract, ocr_available, read_pages, inference_verified
+from .ocr import status as ocr_status
+from .models import AuditEvent, Base, Document, DocumentScreening, Extraction, Finding, Instrument, ReviewDecision, SecurityLabRun, configure_sqlite, protect_history, uid, utcnow
+from .prompt_guard import build_prompt_guard
+from .request_security import SecurityBoundaryMiddleware
+from .upload_security import verify_document, safe_display_filename, write_private_document
 from .samples import SAMPLES, sample_pdf
 from .schemas import ExtractRequest, ExtractionFields, FIELD_NAMES, ReviewRequest, parse_date
 from .validation import canonical_number, evaluate
@@ -60,6 +61,7 @@ def instrument_dict(db, instrument, detail=False):
         'original_extraction': (extraction.payload | {'mode': extraction.mode, 'model': extraction.model}) if extraction else None,
         'extraction_mode': extraction.mode if extraction else None,
         'extraction_error': instrument.extraction_error,
+        'prompt_guard': instrument.screenings[-1].result if instrument.screenings else None,
         'findings': [{key: getattr(item, key) for key in ('id', 'rule_id', 'severity', 'field', 'observed_value', 'expected_value', 'explanation', 'resolved', 'resolution_reason')}
                      for item in instrument.findings if item.active],
     }
@@ -79,6 +81,18 @@ def validate_instrument(db, instrument, settings, actor, reason='Deterministic v
     generated = evaluate(fields, extraction.payload if extraction else None,
                          extraction.page_texts if extraction else [], instrument.corrected_fields,
                          duplicates, settings)
+    if instrument.screenings:
+        screening = instrument.screenings[-1].result
+        if screening['status'] == 'flagged':
+            generated.append(dict(rule_id='PROMPT_INJECTION_REVIEW', severity='warning', field=None,
+                                  observed_value=f"{screening['model']}: score {screening['score']}",
+                                  expected_value='A human review of possible document instructions',
+                                  explanation='The optional classifier flagged possible prompt injection. This may be a false positive; inspect the document and record a reason before resolving.' +
+                                              (' Screening was incomplete; also inspect the unscreened remainder.' if not screening['complete'] else '')))
+        elif settings.prompt_guard_enabled and screening['status'] != 'disabled' and (not screening['complete'] or screening['status'] in ('error', 'unavailable')):
+            generated.append(dict(rule_id='PROMPT_SCREENING_INCOMPLETE', severity='warning', field=None,
+                                  observed_value=screening['status'], expected_value='Explicit human review of unscreened document text',
+                                  explanation='Optional prompt screening did not fully complete. The document is not certified safe; review its contents manually.'))
     previous = {(f.rule_id, f.field, f.observed_value, f.expected_value, f.explanation): f for f in instrument.findings if f.active}
     for item in instrument.findings:
         item.active = False
@@ -102,54 +116,15 @@ def refresh_duplicates(db, changed, settings, actor):
             validate_instrument(db, other, settings, actor, 'Revalidated after a related record changed')
 
 
-def verify_document(data, filename, supplied_type, settings):
-    suffix = Path(filename).suffix.lower()
-    expected = {'.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}
-    if suffix not in expected:
-        raise HTTPException(415, 'Only PDF, PNG and JPEG files are accepted')
-    mime = expected[suffix]
-    if supplied_type and supplied_type not in (mime, 'application/octet-stream'):
-        raise HTTPException(415, 'File content type does not match its extension')
-    if not data:
-        raise HTTPException(400, 'The uploaded file is empty')
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
-        raise HTTPException(413, f'File exceeds the {settings.max_upload_mb} MB limit')
-    try:
-        if mime == 'application/pdf':
-            if not data.startswith(b'%PDF-'):
-                raise ValueError('Missing PDF signature')
-            with fitz.open(stream=data, filetype='pdf') as pdf:
-                if pdf.needs_pass or not 1 <= len(pdf) <= settings.max_pages:
-                    raise ValueError('Encrypted, empty, or over-limit PDF')
-                # Force page parsing before storing; cap page dimensions before rasterization.
-                for page in pdf:
-                    if page.rect.width > 4000 or page.rect.height > 4000 or page.rect.is_empty:
-                        raise ValueError('Unsupported PDF page dimensions')
-                    page.get_text()
-                return mime, len(pdf)
-        import io
-        with warnings.catch_warnings():
-            warnings.simplefilter('error', Image.DecompressionBombWarning)
-            with Image.open(io.BytesIO(data)) as image:
-                actual = {'PNG': 'image/png', 'JPEG': 'image/jpeg'}.get(image.format)
-                if actual != mime or image.width * image.height > 25_000_000:
-                    raise ValueError('Image format or dimensions exceed limits')
-                image.verify()
-        return mime, 1
-    except (ValueError, RuntimeError, fitz.FileDataError, UnidentifiedImageError, Image.DecompressionBombError, Image.DecompressionBombWarning, OSError) as exc:
-        raise HTTPException(400, 'Malformed, encrypted, empty, or oversized document content') from exc
-
-
 def register_document(db, data, filename, mime, settings, actor, seed_key=None):
     verified_mime, page_count = verify_document(data, filename, mime, settings)
     instrument = Instrument(id=uid(), seed_key=seed_key)
     db.add(instrument)
     db.flush()
-    storage_name = uid() + Path(filename).suffix.lower()
-    location = settings.storage_dir / storage_name
-    location.write_bytes(data)
+    location = write_private_document(settings.storage_dir, data, Path(filename).suffix.lower())
+    storage_name = location.name
     db.info.setdefault('created_files', []).append(location)
-    document = Document(instrument_id=instrument.id, filename=Path(filename.replace('\\', '/')).name[:255],
+    document = Document(instrument_id=instrument.id, filename=safe_display_filename(filename),
                         mime_type=verified_mime, size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest(),
                         storage_name=storage_name, page_count=page_count)
     db.add(document)
@@ -160,14 +135,21 @@ def register_document(db, data, filename, mime, settings, actor, seed_key=None):
     return instrument
 
 
-def extract_instrument(db, instrument, mode, settings, actor):
+def extract_instrument(db, instrument, mode, settings, actor, guard=None):
     if instrument.status in TERMINAL:
         raise HTTPException(409, 'Finalized records cannot be extracted again')
     if instrument.corrected_fields:
         raise HTTPException(409, 'Extraction cannot replace reviewed corrections. Continue with manual corrections and validation.')
     previous = instrument.status
     try:
-        texts, images = read_pages(settings.storage_dir / instrument.document.storage_name, instrument.document.mime_type, settings)
+        page_result = read_pages(settings.storage_dir / instrument.document.storage_name, instrument.document.mime_type, settings)
+        texts, images = page_result
+        screening = (guard or build_prompt_guard(settings)).screen('\n\n'.join(texts))
+        db.add(DocumentScreening(instrument_id=instrument.id, result=screening.model_dump()))
+        audit(db, instrument, 'document_screening', actor, screening.reason, previous,
+              {'screening': screening.model_dump(), 'advisory_only': True, 'images_screened': False})
+        db.flush()
+        db.expire(instrument, ['screenings'])
         payload = demo_extract(texts) if mode == 'demo' else gemma_extract(texts, images, settings)
     except (ExtractionFailure, RuntimeError, ValueError, OSError) as exc:
         message = str(exc) if isinstance(exc, ExtractionFailure) else 'The document could not be processed safely. Inspect the original or request clarification.'
@@ -176,9 +158,13 @@ def extract_instrument(db, instrument, mode, settings, actor):
         audit(db, instrument, 'extraction_failed', actor, message, previous, {'mode': mode})
         db.flush()
         return
+    provenance = {'field_extractor': 'labelled_parser' if mode == 'demo' else 'model',
+                  'labelled_evidence_hints': mode == 'gemma',
+                  'model_repair_attempts': payload._repair_attempts,
+                  'pages': getattr(page_result, 'sources', [])}
     extraction = Extraction(instrument_id=instrument.id, mode=mode,
                             model=settings.gemma_model if mode == 'gemma' else None,
-                            payload=payload.model_dump(), page_texts=texts)
+                            payload=payload.model_dump() | {'provenance': provenance}, page_texts=texts)
     db.add(extraction)
     instrument.extraction_error = None
     instrument.status = 'pending_review'
@@ -187,12 +173,12 @@ def extract_instrument(db, instrument, mode, settings, actor):
     db.expire(instrument, ['extractions'])
     audit(db, instrument, 'extraction', actor,
           'Sample labelled-text parser completed; no live AI inference was performed' if mode == 'demo' else 'Configured model returned schema-valid extraction; human review remains required',
-          previous, {'mode': mode, 'model': extraction.model, 'extraction_id': extraction.id})
+          previous, {'mode': mode, 'model': extraction.model, 'extraction_id': extraction.id, 'provenance': provenance})
     validate_instrument(db, instrument, settings, actor)
     refresh_duplicates(db, instrument, settings, actor)
 
 
-def create_app(settings: Settings | None = None):
+def create_app(settings: Settings | None = None, *, prompt_guard=None, include_security_lab=True):
     settings = settings or Settings()
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     url = make_url(settings.database_url)
@@ -207,22 +193,14 @@ def create_app(settings: Settings | None = None):
     Base.metadata.create_all(engine)
     protect_history(engine)
     sessions = sessionmaker(bind=engine, expire_on_commit=False)
-    app = FastAPI(title='FDR Intelligence', version='1.0.0', description='Local demonstration of assisted document review. Findings are review issues, not bank verification or proof of fraud.')
+    app = FastAPI(title='VaultX', version='1.0.0', description='Verify with evidence. Decide with confidence. Local demonstration of assisted document review. Findings are review issues, not bank verification or proof of fraud.')
     app.state.engine = engine
     app.state.settings = settings
+    guard = prompt_guard if prompt_guard is not None else build_prompt_guard(settings)
+    app.state.prompt_guard = guard
+    app.add_middleware(SecurityBoundaryMiddleware, settings=settings)
     app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.frontend_origins.split(',') if origin.strip()],
                        allow_credentials=False, allow_methods=['GET', 'POST'], allow_headers=['Content-Type', 'X-API-Key', 'X-Actor'])
-
-    @app.middleware('http')
-    async def upload_length_limit(request: Request, call_next):
-        length = request.headers.get('content-length')
-        if length:
-            try:
-                if int(length) > settings.max_upload_mb * 1024 * 1024 + 1024 * 1024:
-                    return JSONResponse({'detail': 'Request body exceeds upload limit'}, status_code=413)
-            except ValueError:
-                return JSONResponse({'detail': 'Invalid content length'}, status_code=400)
-        return await call_next(request)
 
     def authorized(x_api_key: str = Header(default=''), x_actor: str = Header(default='Local reviewer')):
         if not hmac.compare_digest(x_api_key.encode('utf-8'), settings.api_key.encode('utf-8')):
@@ -256,8 +234,10 @@ def create_app(settings: Settings | None = None):
     def health():
         return {'status': 'ok', 'extraction_mode': settings.extraction_mode,
                 'model': settings.gemma_model or None, 'model_verified': False,
-                'ocr_available': ocr_available(settings), 'ocr_runtime_verified': False,
+                'ocr_available': ocr_available(settings), 'ocr_runtime_verified': ocr_status(settings)['runtime_verified'],
+                'ocr_engine': settings.ocr_engine, 'inference_runtime_verified': inference_verified(settings),
                 'max_upload_mb': settings.max_upload_mb, 'max_document_pages': settings.max_pages,
+                'prompt_guard': guard.status(), 'security_lab_enabled': settings.security_lab_enabled,
                 'demo_auth': True}
 
     @app.get('/instruments')
@@ -288,7 +268,7 @@ def create_app(settings: Settings | None = None):
     @app.post('/instruments/{instrument_id}/extract')
     def extract(instrument_id: str, request: ExtractRequest = Body(default=ExtractRequest()), actor=Depends(authorized), db=Depends(database)):
         instrument = get_instrument(db, instrument_id)
-        extract_instrument(db, instrument, request.mode or settings.extraction_mode, settings, actor)
+        extract_instrument(db, instrument, request.mode or settings.extraction_mode, settings, actor, guard)
         return instrument_dict(db, instrument, True)
 
     @app.post('/instruments/{instrument_id}/validate')
@@ -406,9 +386,35 @@ def create_app(settings: Settings | None = None):
             if db.scalar(select(Instrument).where(Instrument.seed_key == entry['name'])):
                 continue
             instrument = register_document(db, sample_pdf(entry['name']), entry['name'], 'application/pdf', settings, actor, entry['name'])
-            extract_instrument(db, instrument, 'demo', settings, actor)
+            extract_instrument(db, instrument, 'demo', settings, actor, guard)
             created.append(instrument.id)
         return {'created': len(created), 'instrument_ids': created, 'message': 'Synthetic samples only; no bank verification or live model inference performed.'}
+
+    if settings.security_lab_enabled and include_security_lab:
+        from .security_lab import CONTROLS, guard_status, run_security_lab
+
+        lab_lock = threading.Lock()
+
+        @app.get('/security-lab')
+        def security_lab_inventory(actor=Depends(authorized), db=Depends(database)):
+            latest = db.scalar(select(SecurityLabRun).order_by(SecurityLabRun.created_at.desc()).limit(1))
+            return {'controls': CONTROLS, 'guard': guard_status(guard), 'last_run': latest.report if latest else None}
+
+        @app.post('/security-lab/run')
+        def security_lab_run(actor=Depends(authorized)):
+            if not lab_lock.acquire(blocking=False):
+                raise HTTPException(409, 'A Security Lab run is already in progress')
+            try:
+                report = run_security_lab(settings, guard, create_app)
+                with sessions.begin() as db:
+                    db.add(SecurityLabRun(id=report['id'], actor=actor, report=report))
+                return report
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(503, 'The isolated Security Lab could not complete or persist its report. No successful result was recorded.') from exc
+            finally:
+                lab_lock.release()
 
     return app
 

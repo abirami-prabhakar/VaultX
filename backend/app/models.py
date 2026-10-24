@@ -30,6 +30,7 @@ class Instrument(Base):
     extractions: Mapped[list['Extraction']] = relationship(back_populates='instrument', order_by='Extraction.created_at')
     findings: Mapped[list['Finding']] = relationship(back_populates='instrument')
     reviews: Mapped[list['ReviewDecision']] = relationship(back_populates='instrument')
+    screenings: Mapped[list['DocumentScreening']] = relationship(back_populates='instrument', order_by='DocumentScreening.created_at')
 
 
 class Document(Base):
@@ -98,6 +99,23 @@ class AuditEvent(Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class DocumentScreening(Base):
+    __tablename__ = 'document_screenings'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    instrument_id: Mapped[str] = mapped_column(ForeignKey('instruments.id'), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    result: Mapped[dict] = mapped_column(JSON)
+    instrument: Mapped[Instrument] = relationship(back_populates='screenings')
+
+
+class SecurityLabRun(Base):
+    __tablename__ = 'security_lab_runs'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    actor: Mapped[str] = mapped_column(String(120))
+    report: Mapped[dict] = mapped_column(JSON)
+
+
 def configure_sqlite(engine):
     if engine.dialect.name != 'sqlite':
         return
@@ -111,6 +129,6 @@ def configure_sqlite(engine):
 def protect_history(engine):
     if engine.dialect.name == 'sqlite':
         with engine.begin() as conn:
-            for table in ('audit_events', 'extractions', 'review_decisions'):
+            for table in ('audit_events', 'extractions', 'review_decisions', 'document_screenings', 'security_lab_runs'):
                 for operation in ('UPDATE', 'DELETE'):
                     conn.execute(text(f"CREATE TRIGGER IF NOT EXISTS immutable_{table}_{operation.lower()} BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'History is append-only'); END"))
